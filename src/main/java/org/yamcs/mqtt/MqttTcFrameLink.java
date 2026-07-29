@@ -34,6 +34,7 @@ public class MqttTcFrameLink extends AbstractTcFrameLink implements Runnable {
     Thread thread;
 
     FrameToMqttConverter converter;
+    int qos;
 
     @Override
     public Spec getSpec() {
@@ -41,6 +42,7 @@ public class MqttTcFrameLink extends AbstractTcFrameLink implements Runnable {
         MqttUtils.addConnectionOptionsToSpec(spec);
         spec.addOption("frameMaxRate", OptionType.FLOAT);
         spec.addOption("topic", OptionType.STRING).withRequired(true);
+        spec.addOption("qos", OptionType.INTEGER).withDefault(2);
         spec.addOption("converterClassName", OptionType.STRING)
                 .withDefault(DefaultFrameToMqttConverter.class.getName());
         spec.addOption("converterArgs", OptionType.MAP).withRequired(false);
@@ -53,6 +55,7 @@ public class MqttTcFrameLink extends AbstractTcFrameLink implements Runnable {
         super.init(yamcsInstance, name, config);
         connOpts = MqttUtils.getConnectionOptions(config);
         topic = config.getString("topic");
+        qos = config.getInt("qos");
         if (config.containsKey("frameMaxRate")) {
             rateLimiter = RateLimiter.create(config.getDouble("frameMaxRate"), 1, TimeUnit.SECONDS);
         }
@@ -83,7 +86,8 @@ public class MqttTcFrameLink extends AbstractTcFrameLink implements Runnable {
                 }
                 try {
                     var msg = converter.convert(data);
-                    client.publish(topic, null, msg, new IMqttActionListener() {
+                    msg.setQos(qos);
+                    client.publish(topic, msg, null, new IMqttActionListener() {
                         @Override
                         public void onSuccess(IMqttToken asyncActionToken) {
                             if (tf.isBypass()) {
