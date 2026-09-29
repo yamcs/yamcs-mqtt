@@ -18,6 +18,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.yamcs.ValidationException;
 import org.yamcs.YConfiguration;
 import org.yamcs.commanding.PreparedCommand;
 import org.yamcs.events.EventProducer;
@@ -160,10 +161,10 @@ public class MqttPacketLinkTest {
         mpt.stopAsync().awaitTerminated();
     }
 
-    MqttPacketLink getLink(boolean autoReconnect, String tmTopic) {
-        YConfiguration config = getConfig(broker.port, autoReconnect, tmTopic);
-
+    MqttPacketLink getLink(boolean autoReconnect, String tmTopic) throws ValidationException {
         MqttPacketLink mpt = new MqttPacketLink();
+        // validate against the spec to fill in the defaults, as Yamcs does when loading the link
+        YConfiguration config = mpt.getSpec().validate(getConfig(broker.port, autoReconnect, tmTopic));
         mpt.init("test", "test", config);
         return mpt;
 
@@ -171,6 +172,8 @@ public class MqttPacketLinkTest {
 
     YConfiguration getConfig(int port, boolean autoReconnect, String tmTopic) {
         Map<String, Object> m = new HashMap<>();
+        m.put("name", "test");
+        m.put("class", MqttPacketLink.class.getName());
         m.put("brokers", Arrays.asList("tcp://localhost:" + port));
         m.put("clientId", "test-clientid");
         m.put("connectionTimeoutSecs", 1);

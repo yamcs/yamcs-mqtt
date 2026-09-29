@@ -30,3 +30,8 @@ keepAliveSecs (integer)
 	The keep-alive interval, in seconds, for the MQTT connection.
 	This is the maximum period between communications with the broker before the connection is considered lost.
 	Default: 60
+
+mqttVersion (string)
+	The MQTT protocol version to use when connecting to the broker. One of ``default``, ``3.1`` or ``3.1.1``.
+	With ``default``, the client first tries 3.1.1 and falls back to 3.1 if that fails. In this case the error reported for a failed connection is the one from the 3.1 attempt, which may hide the real cause.
+	Default: default

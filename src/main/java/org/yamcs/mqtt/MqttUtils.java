@@ -25,7 +25,7 @@ public class MqttUtils {
     /**
      * create a new MQTT async client with the clientId and initial broker loaded from the config object
      */
-    static MqttAsyncClient newClient(YConfiguration config) throws ConfigurationException {
+    public static MqttAsyncClient newClient(YConfiguration config) throws ConfigurationException {
         try {
             List<String> brokers = config.getList("brokers");
             String clientId = config.getString("clientId", MqttClient.generateClientId());
@@ -36,7 +36,7 @@ public class MqttUtils {
         }
     }
 
-    static MqttConnectOptions getConnectionOptions(YConfiguration config) {
+    public static MqttConnectOptions getConnectionOptions(YConfiguration config) {
         MqttConnectOptions connOpts = new MqttConnectOptions();
 
         connOpts.setAutomaticReconnect(config.getBoolean("autoReconnect"));
@@ -48,12 +48,24 @@ public class MqttUtils {
         }
         connOpts.setConnectionTimeout(config.getInt("connectionTimeoutSecs"));
         connOpts.setKeepAliveInterval(config.getInt("keepAliveSecs"));
+        connOpts.setMqttVersion(getMqttVersion(config.getString("mqttVersion")));
         connOpts.setCleanSession(true);
 
         return connOpts;
     }
 
-    static void addConnectionOptionsToSpec(Spec spec) {
+    private static int getMqttVersion(String version) {
+        switch (version) {
+        case "3.1":
+            return MqttConnectOptions.MQTT_VERSION_3_1;
+        case "3.1.1":
+            return MqttConnectOptions.MQTT_VERSION_3_1_1;
+        default:
+            return MqttConnectOptions.MQTT_VERSION_DEFAULT;
+        }
+    }
+
+    public static void addConnectionOptionsToSpec(Spec spec) {
         spec.addOption("brokers", OptionType.LIST).withElementType(OptionType.STRING).withRequired(true);
         spec.addOption("username", OptionType.STRING).withRequired(false);
         spec.addOption("password", OptionType.STRING).withRequired(false);
@@ -62,13 +74,15 @@ public class MqttUtils {
         spec.addOption("connectionTimeoutSecs", OptionType.INTEGER).withDefault(5);
         spec.addOption("autoReconnect", OptionType.BOOLEAN).withDefault(true);
         spec.addOption("keepAliveSecs", OptionType.INTEGER).withDefault(60);
+        spec.addOption("mqttVersion", OptionType.STRING).withChoices("default", "3.1", "3.1.1")
+                .withDefault("default");
         spec.requireTogether("username", "password");
     }
 
     /**
      * Connect to MQTT
      */
-    static void connect(MqttConnectOptions connOpts, MqttAsyncClient client, Log log, EventProducer eventProducer)
+    public static void connect(MqttConnectOptions connOpts, MqttAsyncClient client, Log log, EventProducer eventProducer)
             throws MqttException {
         log.info("Connecting to MQTT with clientId {} and options: {}", client.getClientId(), connOpts);
 
@@ -91,7 +105,7 @@ public class MqttUtils {
     /**
      * Connect MQTT and subscribe to a given topic
      */
-    static void connectAndSubscribe(MqttConnectOptions connOpts, MqttAsyncClient client,
+    public static void connectAndSubscribe(MqttConnectOptions connOpts, MqttAsyncClient client,
             IMqttMessageListener messageListener, String topic, Log log, EventProducer eventProducer,
             SubscriptionFailureCallback subscriptionFailureCallback)
             throws MqttException {
