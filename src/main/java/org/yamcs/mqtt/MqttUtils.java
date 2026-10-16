@@ -4,12 +4,15 @@ import java.util.Arrays;
 import java.util.List;
 
 import org.eclipse.paho.client.mqttv3.IMqttActionListener;
+import org.eclipse.paho.client.mqttv3.IMqttDeliveryToken;
 import org.eclipse.paho.client.mqttv3.IMqttMessageListener;
 import org.eclipse.paho.client.mqttv3.IMqttToken;
 import org.eclipse.paho.client.mqttv3.MqttAsyncClient;
+import org.eclipse.paho.client.mqttv3.MqttCallbackExtended;
 import org.eclipse.paho.client.mqttv3.MqttClient;
 import org.eclipse.paho.client.mqttv3.MqttConnectOptions;
 import org.eclipse.paho.client.mqttv3.MqttException;
+import org.eclipse.paho.client.mqttv3.MqttMessage;
 import org.yamcs.ConfigurationException;
 import org.yamcs.Spec;
 import org.yamcs.YConfiguration;
@@ -85,6 +88,7 @@ public class MqttUtils {
     public static void connect(MqttConnectOptions connOpts, MqttAsyncClient client, Log log, EventProducer eventProducer)
             throws MqttException {
         log.info("Connecting to MQTT with clientId {} and options: {}", client.getClientId(), connOpts);
+        client.setCallback(new ConnectionCallback(client, log, eventProducer, null));
 
         client.connect(connOpts, null, new IMqttActionListener() {
             @Override
@@ -103,45 +107,21 @@ public class MqttUtils {
     }
 
     /**
-     * Connect MQTT and subscribe to a given topic
+     * Connect MQTT and subscribe to a given topic.
      */
     public static void connectAndSubscribe(MqttConnectOptions connOpts, MqttAsyncClient client,
             IMqttMessageListener messageListener, String topic, Log log, EventProducer eventProducer,
             SubscriptionFailureCallback subscriptionFailureCallback)
             throws MqttException {
         log.info("Connecting to MQTT with clientId {} and options: {}", client.getClientId(), connOpts);
+        client.setCallback(new ConnectionCallback(client, log, eventProducer,
+                () -> subscribe(client, messageListener, topic, log, eventProducer, subscriptionFailureCallback)));
 
         client.connect(connOpts, null, new IMqttActionListener() {
             @Override
             public void onSuccess(IMqttToken token) {
                 log.info("Succesfully connected to MQTT");
-                try {
-                    client.subscribe(topic, 2, messageListener).setActionCallback(new IMqttActionListener() {
-                        @Override
-                        public void onSuccess(IMqttToken t) {
-                            int[] granted = t.getGrantedQos();
-                            if (granted.length != 1 || granted[0] > 2) {
-                                String msg = "Subscription to " + topic + " failed; granted QoS: "
-                                        + Arrays.asList(granted);
-                                eventProducer.sendWarning(msg);
-                                subscriptionFailureCallback.setSubscriptionFailure(new Exception(msg));
-                            } else {
-                                log.info("Succesfully subscribed to {}", topic);
-                            }
-                        }
-
-                        @Override
-                        public void onFailure(IMqttToken t, Throwable e) {
-                            String msg = "Subscription to " + topic + " failed: " + e.getMessage();
-                            eventProducer.sendWarning(msg);
-                            log.warn("{}", msg);
-                            subscriptionFailureCallback.setSubscriptionFailure(e);
-                        }
-
-                    });
-                } catch (MqttException e) {
-                    subscriptionFailureCallback.setSubscriptionFailure(e);
-                }
+                subscribe(client, messageListener, topic, log, eventProducer, subscriptionFailureCallback);
             }
 
             @Override
@@ -151,6 +131,88 @@ public class MqttUtils {
                 log.warn("{}", msg);
             }
         });
+    }
+
+    private static void subscribe(MqttAsyncClient client, IMqttMessageListener messageListener, String topic,
+            Log log, EventProducer eventProducer, SubscriptionFailureCallback subscriptionFailureCallback) {
+        try {
+            client.subscribe(topic, 2, messageListener).setActionCallback(new IMqttActionListener() {
+                @Override
+                public void onSuccess(IMqttToken t) {
+                    int[] granted = t.getGrantedQos();
+                    if (granted.length != 1 || granted[0] > 2) {
+                        String msg = "Subscription to " + topic + " failed; granted QoS: "
+                                + Arrays.asList(granted);
+                        eventProducer.sendWarning(msg);
+                        subscriptionFailureCallback.setSubscriptionFailure(new Exception(msg));
+                    } else {
+                        log.info("Succesfully subscribed to {}", topic);
+                        subscriptionFailureCallback.setSubscriptionFailure(null);
+                    }
+                }
+
+                @Override
+                public void onFailure(IMqttToken t, Throwable e) {
+                    String msg = "Subscription to " + topic + " failed: " + e.getMessage();
+                    eventProducer.sendWarning(msg);
+                    log.warn("{}", msg);
+                    subscriptionFailureCallback.setSubscriptionFailure(e);
+                }
+
+            });
+        } catch (MqttException e) {
+            String msg = "Subscription to " + topic + " failed: " + e.getMessage();
+            eventProducer.sendWarning(msg);
+            log.warn("{}", msg);
+            subscriptionFailureCallback.setSubscriptionFailure(e);
+        }
+    }
+
+    /**
+     * Reports lost connections and, if needed, subscribes again after an automatic reconnect.
+     */
+    static class ConnectionCallback implements MqttCallbackExtended {
+        final MqttAsyncClient client;
+        final Log log;
+        final EventProducer eventProducer;
+        final Runnable onReconnect;
+
+        ConnectionCallback(MqttAsyncClient client, Log log, EventProducer eventProducer, Runnable onReconnect) {
+            this.client = client;
+            this.log = log;
+            this.eventProducer = eventProducer;
+            this.onReconnect = onReconnect;
+        }
+
+        @Override
+        public void connectionLost(Throwable cause) {
+            String msg = "Lost MQTT connection with clientId " + client.getClientId() + ": "
+                    + (cause == null ? "unknown cause" : cause.getMessage());
+            eventProducer.sendWarning(msg);
+            log.warn("{}", msg);
+        }
+
+        @Override
+        public void connectComplete(boolean reconnect, String serverURI) {
+            if (!reconnect) {
+                return;
+            }
+            String msg = "Reconnected to MQTT " + serverURI + " with clientId " + client.getClientId();
+            eventProducer.sendInfo(msg);
+            log.info("{}", msg);
+            if (onReconnect != null) {
+                onReconnect.run();
+            }
+        }
+
+        @Override
+        public void messageArrived(String topic, MqttMessage message) {
+            // messages are delivered to the listener given at subscription
+        }
+
+        @Override
+        public void deliveryComplete(IMqttDeliveryToken token) {
+        }
     }
 
     public static void doDisable(MqttAsyncClient client) throws MqttException {
